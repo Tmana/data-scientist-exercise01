@@ -86,10 +86,10 @@ library(dplyr)
 library(ROCR)
 library(pastecs)
 library(psych)
-
+library(e1071)
 ```
 ```{r}
-setwd("C:/Users/Tanner/Downloads") #setting working directory, replace with your own filepath
+setwd("C:/Users/trobart/Desktop/data-scientist-exercise01") #setting working directory, replace with your own filepath
 census_data <- fread("flattened_census_data.csv") # read in csv file as data.table object
 census_data[census_data == '?'] <- NA #replacing '?' entries with NA
 census_data$Over_50k <- factor(census_data$Over_50k)
@@ -112,21 +112,41 @@ ggpairs(census_data, columns = c('age', 'Sex', 'Race' , 'Over_50k'), diag=list(c
 ```
 
 
-ggpairs provides an easy first look at feature relationships in the data, and allows us to compare continuous and categorical features without first having to do any formatting or type-casting. This is a little messy, and since ggpairs is faceting the plots by levels, some features with many levels are hard to read, like Race. Despite treating this merely as a first look, we can still learn a lot. From examining this we can see we have about twice as many males as females in this data, and age has a skew of a long right-tailed distribution, median around 33. We can also see that the age distribution for Over_50k earners is older on average than those who make less. Lets take a closer look at the differences of the Over_50k groups.
+ggpairs provides an easy first look at feature relationships in the data, and allows us to compare continuous and categorical features without first having to do any formatting or type-casting. This is a little messy, and since ggpairs is faceting the plots by levels, some features with many levels are hard to read, like Race. Despite treating this merely as a first look, we can still learn a lot. From examining this we can see we have about twice as many males as females in this data, and age has a skew of a long right-tailed distribution, median around 33. We can also see that the age distribution for Over_50k earners is older on average than those who make less. Lets take a closer look at the differences between under and over 50k earners within other variables.
 
 ```{r}
 #pairs for other features that are difficult to read in this format
 #ggpairs(census_data, columns = c('Workclass',"Relationship", 'Occupation','Over_50k'), axisLabels="show")
 ```
 
+
+### Over 50k proportion
 ```{r}
-p1 <- ggplot(census_data, aes(census_data$Over_50k, fill = factor(census_data$Over_50k))) +geom_bar()
+p1 <- ggplot(census_data, aes(Over_50k, fill = Over_50k)) +geom_bar()
 print(p1)
 ```
+
+
+### Age vs. Over_50k
 ```{r}
 p2 <- ggplot(census_data, aes(x = Over_50k, y = age, fill = Over_50k)) + geom_boxplot()
 print(p2)
 ```
+
+
+### Education
+```{r}
+p3 <- ggplot(census_data, aes(x = Over_50k, y = education_num, fill = Over_50k)) + geom_boxplot()
+print(p3)
+```
+
+We can clearly see that education has a strong relationship with earning over 50k.
+
+### Hours Worked
+```{r}
+
+```
+
 
 ```{r}
 census_data$Workclass <- factor(census_data$Workclass, levels=c( "NA","Never-worked", "Without-pay","Federal-gov","Local-gov", "State-gov" , "Self-emp-inc", "Self-emp-not-inc", "Private"))
@@ -138,7 +158,9 @@ print(p3)
 ```
 
 
-This plot makes it clear that the working class with the greatest proportionof over 50k earners is in the 
+This plot makes it clear that the working class with the greatest proportion of over 50k earners is in the self-employed-inc group. But we have by far the most entries from the Private catagory, with more over 50k earners than any single other workclass both over and under 50k.
+
+
 ```{r}
 census_data$Education_Level <- factor(census_data$Education_Level, levels=c("Preschool","1st-4th", "5th-6th", "7th-8th", "9th", "10th", "11th", "12th", "HS-grad", "Prof-school", "Assoc-acdm", "Assoc-voc", "Some-college", "Bachelors", "Masters", "Doctorate"))  #re-ordering factor levels to reflect a more sensible linear order
 
@@ -152,12 +174,46 @@ print(p4)
 ```{r}
 #census_data$Occupation <- factor(census_data$Occupation, levels=c()  #re-ordering factor levels to reflect a more sensible order
 
-p4 <- ggplot(census_data, aes(x = Occupation, fill = Over_50k )) + 
+p5 <- ggplot(census_data, aes(x = Occupation, fill = Over_50k )) + 
   geom_bar() + 
   theme( axis.text.x = element_text(angle=45))
 
-print(p4)
+print(p5)
 ```
+
+The occupations with the greatest proportion of over 50k earners are Exec-managerial and Prof-speciality, which makes sense because executive managerial positions generally earn the most within a company, and speciality professionals could charge whatever the want for an uncommon skill or service.
+
+
+
+```{r}
+p5 <- ggplot(census_data, aes(x = Relationship, fill = Over_50k )) + 
+  geom_bar() + 
+  theme( axis.text.x = element_text(angle=45))
+
+print(p5)
+```
+
+```{r}
+
+p6 <- ggplot(census_data, aes(Capital_Gain, fill = Over_50k)) + 
+  geom_histogram() + 
+  theme( axis.text.x = element_text(angle=45))
+
+print(p6)
+```
+
+This one is very interesting, it appears more than **90%** of rows in our data have a value of 0 for capital gains, which is significant bias for this feature. However all rows above a certain capital_gain value are over_50k earners, which may be a useful predictive variable. So instead, it might be useful to make a new feature of only capital gains > 0. This feature might improve model performance over the regular capital gain.
+
+```{r}
+
+p5 <- ggplot(census_data, aes(Capital_Loss, fill = Over_50k)) + 
+  geom_histogram() + 
+  theme( axis.text.x = element_text(angle=45))
+
+print(p5)
+```
+
+The same is true of our Capital_Loss feature as it is of our Capital_Gain, so we might want to consider also throwing out the Capital_Loss values of 0, and only using those > 0 as a model feature.
 
 
 ## Split the data into training, validation, and test data sets. 
@@ -169,22 +225,25 @@ training <- census_data[sub, ]
 testing <- census_data[-sub, ]
 ```
 
+
 ## Create a model that predicts whether individuals, based on the census variables provided, make over $50,000/year.
 
 Next we will fit a few models and compare their performance. But first we need to perform some feature selection based on our previous explorations.
 
 
-
-
 ### Feature selection 
 
+```{r}
+training <- training[]
+```
 
-## Random Forest Model
+
+### Random Forest Model
 ```{r}
 library(randomForest) #load random_forest package
 
 #fit the randomforest model
-model <- randomForest(Over_50k~ age + na.omit(training$Race) + na.omit(training$Workclass) + Education_Level,
+model <- randomForest(Over_50k~ age + Race + Workclass + Education_Level,
 	data = training,
 	importance=TRUE,
 	keep.forest=TRUE
@@ -207,7 +266,7 @@ print(rsq)
 ```
 
 
-## Logistic Regression Model
+### Logistic Regression Model
 
 ```{r}
 mylogit <- glm(Over_50k ~ Sex+ age + Race + Workclass + Education_Level, data = training, family = "binomial")
@@ -232,10 +291,15 @@ plot(mylogitACC)
 mylogitAUC <- unlist(performance(mylogitPredictions, 'auc')@y.values)
 mylogitAUC
 
+# determining cutoff to use from specificity and sensitivity
+
+# cutoff <- unlist(mylogitROC@alpha.values)[which.max(unlist(mylogitROC@y.values)+ ( 1 - unlist(mylogitROC@x.values) )-1)]
+
+cutoff <- .23
 
 
 predicted <- ifelse(predictions >= cutoff, 1, 0)
-logitConfusion <- table(actual, predicted)
+logitConfusion <- table(testing$Over_50k, predicted)
 logitTruePos <- logitConfusion[2,2]/sum(logitConfusion[2,])
 logitTrueNeg <- logitConfusion[1,1]/sum(logitConfusion[1,])
 logitAccuracy <-sum(logitConfusion[2,2],logitConfusion[1,1])/sum(logitConfusion)
@@ -249,25 +313,39 @@ logitAccuracy
 
 ## Support Vector Machine Model
 
+
+```{r}
+svm.model <- svm(Over_50k ~ Sex+ age + Race + Workclass + Education_Level, data = training, cost = 50, gamma = 1)
+print(svm.model)
+summary(svm.model)
+```
+
 ### Testing and Validation
 
 ```{r}
-predictions <- predict(mylogit, na.omit(testing), type = "response")
-mylogitPredictions <- prediction(predictions, list(testing$Over_50K))
+predictions <- predict(mylogit, testing, type = "response")
+mylogitPredictions <- prediction(predictions, list(testing$Over_50k))
 
-#ROC 
+
+# ROC 
 mylogitROC <- performance(mylogitPredictions, 'tpr','fpr')
 plot(mylogitROC)
 mylogitACC <- performance(mylogitPredictions, 'acc')
 plot(mylogitACC)
 
-#AUC
-mylogitAUC <- performance(mylogitPredictions, 'auc')
-mylogitAUC <- unlist(mylogitAUC@y.values)
+# AUC
+mylogitAUC <- unlist(performance(mylogitPredictions, 'auc')@y.values)
 mylogitAUC
 
+# determining cutoff to use from specificity and sensitivity
+
+# cutoff <- unlist(mylogitROC@alpha.values)[which.max(unlist(mylogitROC@y.values)+ ( 1 - unlist(mylogitROC@x.values) )-1)]
+
+cutoff <- .23
+
+
 predicted <- ifelse(predictions >= cutoff, 1, 0)
-logitConfusion <- table(actual, predicted)
+logitConfusion <- table(testing$Over_50k, predicted)
 logitTruePos <- logitConfusion[2,2]/sum(logitConfusion[2,])
 logitTrueNeg <- logitConfusion[1,1]/sum(logitConfusion[1,])
 logitAccuracy <-sum(logitConfusion[2,2],logitConfusion[1,1])/sum(logitConfusion)
@@ -275,7 +353,6 @@ logitAccuracy <-sum(logitConfusion[2,2],logitConfusion[1,1])/sum(logitConfusion)
 logitTruePos
 logitTrueNeg
 logitAccuracy
-
 
 ```
 
