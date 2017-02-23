@@ -1,0 +1,179 @@
+---
+title: "RTI - Data Science Exercise"
+author: "Tanner Robart"
+date: "2/20/17"
+output: html_document
+---
+
+## Report Summary
+
+
+
+### The following is the exercise prompt:
+
+* Write a SQL query that creates a consolidated dataset from the normalized tables in the database. In other words, write a SQL query that "flattens" the database to a single table.
+* Export the "flattened" table to a CSV file.\n
+* Import the "flattened" table (or CSV file) into your open source analytic environment of choice (R, Python, Java, etc.) and stage it for analysis. \n
+* Perform some simple exploratory analysis and generate summary statistics to get a sense of what is in the data. You should commit any useful or informative exloratory code. \n
+* Split the data into training, validation, and test data sets. \n
+* Develop a model that predicts whether individuals, based on the census variables provided, make over $50,000/year. Use over_50k as the target variable. \n
+* Commit enough code to reproduce your full model selection process, including your final model and all models developed along the way. \n
+* Generate a chart that you feel conveys 1 or more important relationships in the data. \n
+* Describe your methodology and results in 1/2 page of writing. \n
+* Include the chart(s) generated in Step 7 as part of your write-up. If neccesary, explain how the chart(s) informs your approach.
+
+
+##Step 1
+#### Write a SQL query that creates a consolidated dataset from the normalized tables in the database. In other words, write a SQL query that "flattens" the database to a single table.
+
+The following SQL query provides a flattened table that we can export to .csv
+```
+SELECT
+	recs.id,
+	recs.age,
+	s.name as Sex,
+	race.name as Race,
+	w.name as Workclass,
+	edu.name as Education_Level,
+  recs.education_num,
+  c.name as Country,
+	o.name as Occupation,
+	rel.name as Relationship,
+  m.name as Marital_Status,
+	recs.capital_gain as Capital_Gain,
+	recs.capital_loss as Captial_Loss,
+	recs.over_50k as Over_50k
+	
+FROM 'records' recs
+
+join countries c
+    on c.id = recs.country_id
+join workclasses w
+	on w.id = recs.workclass_id
+join marital_statuses m
+	on m.id = recs.marital_status_id
+join education_levels edu
+	on edu.id = recs.education_level_id
+join occupations o
+	on o.id = recs.occupation_id
+join sexes s
+	on s.id = recs.sex_id
+join races race
+	on race.id = recs.race_id
+join relationships rel
+	on rel.id = recs.relationship_id
+```
+
+This query gives us a single table that we can now export to csv and load into R. We do this and take a first look at some summary statistics for the data.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+#install.packages("data.table")
+#install.packages("ggplot2")
+#install.packages("GGally")
+#install.packages("randomForest")
+#install.packages("dplyr")
+#install.packages("tidyr")
+#install.packages("ROCR")
+#install.packages("pastecs")
+#install.packages("psych")
+
+#Loading Packages
+library(data.table)
+library(ggplot2)
+library(GGally)
+library(dplyr)
+library(ROCR)
+library(pastecs)
+library(psych)
+
+```
+```{r}
+setwd("C:/Users/Tanner/Downloads") #setting working directory, replace with your own filepath
+data <- fread("RTI_exercise1.csv") # read in csv file as data.table object
+#data[data == '?'] <- NA #replacing '?' entries with NA
+data$Over_50k <- factor(data$Over_50k)
+head(data)
+summary(data)
+```
+This summary provides a quick look at the distributions of the continuous variables. It also shows us that the count of Over_50k is 11687 out of 48842, or **~23.9%** of our dataset make over 50k. But this is a little messy to read and doesn't provide many useful summary statistics, so lets take a look using the psych package's describe() method.
+
+
+### Additonal summary statistics
+```{r, warning = FALSE}
+describe(data)
+```
+This table is easier to read and includes standard deviation, skew, se, and kurtosis information. So now lets take a closer look at our target variable and its relationship to the other features.
+
+
+### Examining initial relationships between variables using a matrix plot
+```{r pressure, warning = FALSE, echo=FALSE}
+ggpairs(data, columns = c('age', 'Sex', 'Race' , 'Over_50k'), diag=list(continuous="density",   discrete="bar"), axisLabels="show")
+```
+ggpairs provides an easy first look at feature relationships in the data, and allows us to compare continuous and categorical features without first having to do any formatting or type-casting. This is a little messy, and since ggpairs is faceting the plots by levels, some features with many levels are hard to read, like Race. However, treating this merely as a first look, we can still learn a lot. From examining this we can see we have about twice as many males as females in this data, and age has a skew of a long right-tailed distribution, median around 33. We can also see that the age distribution for Over_50k earners is higher on average than those who make less. Lets take a closer look at the differences of the Over_50k groups.
+
+```{r}
+ggpairs(data, columns = c('Workclass',"Relationship", 'Occupation','Over_50k'), axisLabels="show")
+```
+
+```{r}
+p1 <- ggplot(data, aes(data$Over_50k, fill = factor(data$Over_50k))) +geom_bar()
+print(p1)
+```
+```{r}
+p2 <- ggplot(data, aes(x = Over_50k, y = age, fill = Over_50k)) + geom_boxplot()
+print(p2)
+```
+
+```{r}
+p3 <- ggplot(data, aes(x = Workclass, fill = factor(Workclass))) +geom_bar() +facet_wrap(~Over_50k)
+print(p3)
+```
+
+```{r}
+p3 <- ggplot(data, aes(x = Education_Level, fill = factor(Education_Level))) +geom_bar() +facet_wrap(~Over_50k)
+print(p3)
+```
+
+```{r}
+set.seed(1111) #setting seed for reproducibility
+sub <- sample(nrow(data), floor(nrow(data) * 0.7))
+training <- data[sub, ]
+testing <- data[-sub, ]
+```
+
+##Training models on Over_50k target variable
+```{r}
+library(randomForest) #load random_forest package
+
+#fit the randomforest model
+# model <- randomForest(Over_50k~age+Race+Workclass+Education_Level, 
+# 	data = training, 
+# 	importance=TRUE,
+# 	keep.forest=TRUE
+# )
+# 
+# print(model)
+# 
+# #what are the important variables (via permutation)
+# varImpPlot(model, type=1)
+# 
+# #predict the outcome of the testing data
+# predicted <- predict(model, newdata=testing[ ,-1])
+# 
+# # what is the proportion variation explained in the outcome of the testing data?
+# # ( what is 1-(SSerror/SStotal)? )
+# actual <- testing$Sepal.Length
+# rsq <- 1-sum((actual-predicted)^2)/sum((actual-mean(actual))^2)
+# print(rsq)
+```
+
+```{r}
+mylogit <- glm(Over_50k ~age+Race+Workclass+Education_Level, data = data, family = "binomial")
+print(mylogit)
+summary(mylogit)
+```
+
+```{r}
+
+```
+
