@@ -3,7 +3,6 @@ title: "RTI - Data Science Exercise"
 author: "Tanner Robart"
 date: "2/20/17"
 output: html_document
-runtime: "shiny"
 ---
 
 ## Report Summary
@@ -35,6 +34,7 @@ SELECT
 	s.name as Sex,
 	race.name as Race,
 	w.name as Workclass,
+	recs.hours_week as Hours_Worked,
 	edu.name as Education_Level,
   recs.education_num,
   c.name as Country,
@@ -42,7 +42,7 @@ SELECT
 	rel.name as Relationship,
   m.name as Marital_Status,
 	recs.capital_gain as Capital_Gain,
-	recs.capital_loss as Captial_Loss,
+	recs.capital_loss as Capital_Loss,
 	recs.over_50k as Over_50k
 	
 FROM 'records' recs
@@ -87,12 +87,13 @@ library(ROCR)
 library(pastecs)
 library(psych)
 library(e1071)
+library(shiny)
 ```
 ```{r}
 setwd("C:/Users/trobart/Desktop/data-scientist-exercise01") #setting working directory, replace with your own filepath
 census_data <- fread("flattened_census_data.csv") # read in csv file as data.table object
 census_data[census_data == '?'] <- NA #replacing '?' entries with NA
-census_data$Over_50k <- factor(census_data$Over_50k)
+census_data$Over_50k <- factor(census_data$Over_50k) #making sure Over-50k is treated as a factor 
 head(census_data)
 summary(census_data)
 ```
@@ -103,7 +104,14 @@ This summary provides a quick look at the distributions of the continuous variab
 ```{r, warning = FALSE}
 describe(census_data)
 ```
-This table is easier to read and includes standard deviation, skew, se, and kurtosis information. So now lets take a closer look at our target variable and its relationship to the other features.
+This table is easier to read and includes standard deviation, skew, se, and kurtosis information. Many of the categorical variables have NA for their summary statistics because they are not ordinal or continuous. Lets also examine how much missing data we have. 
+```{r}
+library(Amelia)
+missmap(census_data, main = "Missing values vs observed")
+```
+
+
+It looks like Occupation and Workclass are the only variables with significant missing values, and we'll keep that in mind during feature selection later. Now lets take a closer look at our target variable and its relationship to the other features.
 
 
 ### Examining initial relationships between variables using a matrix plot
@@ -120,7 +128,25 @@ ggpairs provides an easy first look at feature relationships in the data, and al
 ```
 
 
-### Over 50k proportion
+<!-- deprecated attempt to add shiny exploration of variables
+
+<!-- Next we provide a small shiny interface to let you explore the features. -->
+
+<!-- Choose a feature to examine: -->
+<!-- ```{r echo = FALSE} -->
+<!-- selectInput("features", "", choices = names(census_data)) -->
+<!-- ``` -->
+<!-- See a plot: -->
+<!-- ```{r echo = FALSE, warning= FALSE} -->
+<!-- renderPlot({ -->
+<!--  d <- get(input$features) -->
+<!--  ggplot(census_data, aes_string(d, fill = 'Over_50k')) + geom_bar() -->
+<!-- }) -->
+<!-- ``` -->
+
+
+
+#### Over 50k proportion
 ```{r}
 p1 <- ggplot(census_data, aes(Over_50k, fill = Over_50k)) +geom_bar()
 print(p1)
@@ -134,31 +160,13 @@ print(p2)
 ```
 
 
-### Education
+#### Education
 ```{r}
 p3 <- ggplot(census_data, aes(x = Over_50k, y = education_num, fill = Over_50k)) + geom_boxplot()
 print(p3)
 ```
 
-We can clearly see that education has a strong relationship with earning over 50k.
-
-### Hours Worked
-```{r}
-
-```
-
-
-```{r}
-census_data$Workclass <- factor(census_data$Workclass, levels=c( "NA","Never-worked", "Without-pay","Federal-gov","Local-gov", "State-gov" , "Self-emp-inc", "Self-emp-not-inc", "Private"))
-p3 <- ggplot(census_data, aes(x = Workclass, fill = Over_50k)) +
-  geom_bar() + 
-  theme( axis.text.x = element_text(angle=45))
-
-print(p3)
-```
-
-
-This plot makes it clear that the working class with the greatest proportion of over 50k earners is in the self-employed-inc group. But we have by far the most entries from the Private catagory, with more over 50k earners than any single other workclass both over and under 50k.
+We can clearly see that education has a strong relationship with earning over 50k. Lets take a look at the individual category breakdowns.
 
 
 ```{r}
@@ -171,6 +179,44 @@ p4 <- ggplot(census_data, aes(x = Education_Level, fill = Over_50k )) +
 print(p4)
 ```
 
+
+Education level seems to be a very good indicator of earning over 50k, with proportion of over_50k increasing as the education level increases. Lets also take a look at education level to see if it contains any other useful information.
+
+```{r}
+p4 <- ggplot(census_data, aes(x = education_num, fill = Over_50k )) + 
+  geom_bar() + 
+  theme( axis.text.x = element_text(angle=45))
+print(p4)
+```
+
+#### Hours Worked
+```{r}
+p3 <- ggplot(census_data, aes(x = Hours_Worked, fill = Over_50k)) +
+  geom_bar() + 
+  theme( axis.text.x = element_text(angle=45))
+
+print(p3)
+```
+
+#### Workclass
+```{r}
+census_data$Workclass <- factor(census_data$Workclass, levels=c( "NA","Never-worked", "Without-pay","Federal-gov","Local-gov", "State-gov" , "Self-emp-inc", "Self-emp-not-inc", "Private"))
+p3 <- ggplot(census_data, aes(x = Workclass, fill = Over_50k)) +
+  geom_bar() + 
+  theme( axis.text.x = element_text(angle=45))
+
+print(p3)
+```
+
+
+This plot makes it clear that the working class with the greatest proportion of over 50k earners is in the self-employed-inc group. But we have by far the most entries from the Private catagory, with more over_50k earners than any single other workclass including both over and under 50k earners. There are only two entries for Never-worked, and so when fitting models, R does not like when the training set does not contain this factor level, so we will remove it without any issues to model performance.
+
+```{r}
+census_data[Workclass == "Never-worked"] <- NA
+```
+
+
+#### Occupation
 ```{r}
 #census_data$Occupation <- factor(census_data$Occupation, levels=c()  #re-ordering factor levels to reflect a more sensible order
 
@@ -184,7 +230,7 @@ print(p5)
 The occupations with the greatest proportion of over 50k earners are Exec-managerial and Prof-speciality, which makes sense because executive managerial positions generally earn the most within a company, and speciality professionals could charge whatever the want for an uncommon skill or service.
 
 
-
+#### Relationship
 ```{r}
 p5 <- ggplot(census_data, aes(x = Relationship, fill = Over_50k )) + 
   geom_bar() + 
@@ -193,6 +239,10 @@ p5 <- ggplot(census_data, aes(x = Relationship, fill = Over_50k )) +
 print(p5)
 ```
 
+Examining the Relationship variable, we see clearly that husbands and wives are much more likely to earn over 50k compared to the other categories. This may be a good correlated feature in our models, so we should definitely use it, and maybe even split it into a binary of is wife/husband or not.  
+
+
+#### Capital Gain
 ```{r}
 
 p6 <- ggplot(census_data, aes(Capital_Gain, fill = Over_50k)) + 
@@ -204,6 +254,7 @@ print(p6)
 
 This one is very interesting, it appears more than **90%** of rows in our data have a value of 0 for capital gains, which is significant bias for this feature. However all rows above a certain capital_gain value are over_50k earners, which may be a useful predictive variable. So instead, it might be useful to make a new feature of only capital gains > 0. This feature might improve model performance over the regular capital gain.
 
+#### Capital Loss
 ```{r}
 
 p5 <- ggplot(census_data, aes(Capital_Loss, fill = Over_50k)) + 
@@ -230,11 +281,12 @@ testing <- census_data[-sub, ]
 
 Next we will fit a few models and compare their performance. But first we need to perform some feature selection based on our previous explorations.
 
-
 ### Feature selection 
 
 ```{r}
-training <- training[]
+# training <- training[ c("Relationship", "Education_Level") := NULL]
+# testing <- testing[ c("Relationship", "Education_Level") := NULL]
+
 ```
 
 
@@ -242,37 +294,40 @@ training <- training[]
 ```{r}
 library(randomForest) #load random_forest package
 
-#fit the randomforest model
-model <- randomForest(Over_50k~ age + Race + Workclass + Education_Level,
-	data = training,
-	importance=TRUE,
-	keep.forest=TRUE
-)
-
-print(model)
-
-#what are the important variables
-
-varImpPlot(model, type=1)
-
-#predict the outcome of the testing data
-predicted <- predict(model, newdata=testing[ ,-1])
-
-# what is the proportion variation explained in the outcome of the testing data?
-# ( what is 1-(SSerror/SStotal)? )
-actual <- testing$Sepal.Length
-rsq <- 1-sum((actual-predicted)^2)/sum((actual-mean(actual))^2)
-print(rsq)
+# #fit the randomforest model
+# model <- randomForest(Over_50k~ age + Race + Workclass + Education_Level,
+# 	data = training,
+# 	importance=TRUE,
+# 	keep.forest=TRUE
+# )
+# 
+# print(model)
+# 
+# varImpPlot(model, type=1)
+# 
+# #make predictions about testing data
+# predicted <- predict(model, newdata=testing[ ,-1])
+# 
+# # how much variation does the model account for in the 
+# 
+# actual <- testing$Over_50k
+# rsq <- 1-sum((actual-predicted)^2)/sum((actual-mean(actual))^2)
+# print(rsq)
 ```
 
 
 ### Logistic Regression Model
 
 ```{r}
-mylogit <- glm(Over_50k ~ Sex+ age + Race + Workclass + Education_Level, data = training, family = "binomial")
-print(mylogit)
+mylogit <- glm(Over_50k ~ ., data = training, family = "binomial")
 summary(mylogit)
 ```
+
+```{r}
+anova(mylogit, test="Chisq")
+```
+
+
 
 ### Testing and Validation
 
@@ -291,11 +346,12 @@ plot(mylogitACC)
 mylogitAUC <- unlist(performance(mylogitPredictions, 'auc')@y.values)
 mylogitAUC
 
+
 # determining cutoff to use from specificity and sensitivity
 
 # cutoff <- unlist(mylogitROC@alpha.values)[which.max(unlist(mylogitROC@y.values)+ ( 1 - unlist(mylogitROC@x.values) )-1)]
 
-cutoff <- .23
+cutoff <- .5 #using a default cutoff of .5 is reasonable and favors high accuracy, but the true positive and false positive rate tradeoff can be optimized to favor one over the other depending on the situation.
 
 
 predicted <- ifelse(predictions >= cutoff, 1, 0)
@@ -315,45 +371,12 @@ logitAccuracy
 
 
 ```{r}
-svm.model <- svm(Over_50k ~ Sex+ age + Race + Workclass + Education_Level, data = training, cost = 50, gamma = 1)
-print(svm.model)
-summary(svm.model)
+# svm.model <- svm(Over_50k ~ Sex+ age + Race, data = training, cost = 500, gamma = 1, epsilon = .2, kernel = "linear")
+# print(svm.model)
+# summary(svm.model)
 ```
 
 ### Testing and Validation
 
-```{r}
-predictions <- predict(mylogit, testing, type = "response")
-mylogitPredictions <- prediction(predictions, list(testing$Over_50k))
-
-
-# ROC 
-mylogitROC <- performance(mylogitPredictions, 'tpr','fpr')
-plot(mylogitROC)
-mylogitACC <- performance(mylogitPredictions, 'acc')
-plot(mylogitACC)
-
-# AUC
-mylogitAUC <- unlist(performance(mylogitPredictions, 'auc')@y.values)
-mylogitAUC
-
-# determining cutoff to use from specificity and sensitivity
-
-# cutoff <- unlist(mylogitROC@alpha.values)[which.max(unlist(mylogitROC@y.values)+ ( 1 - unlist(mylogitROC@x.values) )-1)]
-
-cutoff <- .23
-
-
-predicted <- ifelse(predictions >= cutoff, 1, 0)
-logitConfusion <- table(testing$Over_50k, predicted)
-logitTruePos <- logitConfusion[2,2]/sum(logitConfusion[2,])
-logitTrueNeg <- logitConfusion[1,1]/sum(logitConfusion[1,])
-logitAccuracy <-sum(logitConfusion[2,2],logitConfusion[1,1])/sum(logitConfusion)
-
-logitTruePos
-logitTrueNeg
-logitAccuracy
-
-```
 
 ## Conclusion
