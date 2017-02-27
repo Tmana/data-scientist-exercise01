@@ -180,23 +180,35 @@ print(p4)
 ```
 
 
-Education level seems to be a very good indicator of earning over 50k, with proportion of over_50k increasing as the education level increases. Lets also take a look at education level to see if it contains any other useful information.
+Education level seems to be a very good indicator of earning over 50k, with proportion of over_50k increasing as the education level increases. Lets also take a look at education number to see if it contains any other useful information not included in education level.
 
 ```{r}
-p4 <- ggplot(census_data, aes(x = education_num, fill = Over_50k )) + 
+p5 <- ggplot(census_data, aes(x = education_num, fill = Over_50k )) + 
   geom_bar() + 
   theme( axis.text.x = element_text(angle=45))
-print(p4)
+print(p5)
 ```
+
+The order of the values in education num differ from what my intuition of the proper order of levels of education are, but it appears this feature contains all the same information as education level. As such, we will want to remove one or the other to avoid co-linearity of features when fitting a model.
 
 #### Hours Worked
+
 ```{r}
-p3 <- ggplot(census_data, aes(x = Hours_Worked, fill = Over_50k)) +
+p6 <- ggplot(census_data, aes(x = Over_50k, y = Hours_Worked, fill = Over_50k)) + geom_boxplot()
+print(p6)
+```
+
+We can see there seems to be a signifcant effect of hours worked on whether an individual earns over 50k or not. Lets take a closer look at the breakdown of hours worked.
+
+```{r}
+p6 <- ggplot(census_data, aes(x = Hours_Worked, fill = Over_50k)) +
   geom_bar() + 
   theme( axis.text.x = element_text(angle=45))
 
-print(p3)
+print(p6)
 ```
+The large majority of individuals have a full 40 hours a week listed, and there are a larger proportion of 50k earners for hours worked above 40 than those below.
+
 
 #### Workclass
 ```{r}
@@ -286,34 +298,10 @@ Next we will fit a few models and compare their performance. But first we need t
 ```{r}
 # training <- training[ c("Relationship", "Education_Level") := NULL]
 # testing <- testing[ c("Relationship", "Education_Level") := NULL]
-
+levels(testing) = list(HS_or_less = c(1, 3, 8), undergrad = c(2, 4), graduate = 5:7)
+levels(training) = list(HS_or_less = c(1, 3, 8), undergrad = c(2, 4), graduate = 5:7)
 ```
 
-
-### Random Forest Model
-```{r}
-library(randomForest) #load random_forest package
-
-# #fit the randomforest model
-# model <- randomForest(Over_50k~ age + Race + Workclass + Education_Level,
-# 	data = training,
-# 	importance=TRUE,
-# 	keep.forest=TRUE
-# )
-# 
-# print(model)
-# 
-# varImpPlot(model, type=1)
-# 
-# #make predictions about testing data
-# predicted <- predict(model, newdata=testing[ ,-1])
-# 
-# # how much variation does the model account for in the 
-# 
-# actual <- testing$Over_50k
-# rsq <- 1-sum((actual-predicted)^2)/sum((actual-mean(actual))^2)
-# print(rsq)
-```
 
 
 ### Logistic Regression Model
@@ -367,16 +355,38 @@ logitAccuracy
 ```
 
 
-## Support Vector Machine Model
+<!-- ## Support Vector Machine Model -->
 
 
-```{r}
-# svm.model <- svm(Over_50k ~ Sex+ age + Race, data = training, cost = 500, gamma = 1, epsilon = .2, kernel = "linear")
-# print(svm.model)
-# summary(svm.model)
-```
+<!-- ```{r} -->
+<!-- # svm.model <- svm(Over_50k ~ Sex+ age + Race, data = training, cost = 500, gamma = 1, epsilon = .2, kernel = "linear") -->
+<!-- # print(svm.model) -->
+<!-- # summary(svm.model) -->
+<!-- ``` -->
+<!-- ### Random Forest Model -->
+<!-- ```{r} -->
+<!-- library(randomForest) #load random_forest package -->
 
-### Testing and Validation
+<!-- # #fit the randomforest model -->
+<!-- # model <- randomForest(Over_50k~ age + Race + Workclass + Education_Level, -->
+<!-- # 	data = training, -->
+<!-- # 	importance=TRUE, -->
+<!-- # 	keep.forest=TRUE -->
+<!-- # ) -->
+<!-- #  -->
+<!-- # print(model) -->
+<!-- #  -->
+<!-- # varImpPlot(model, type=1) -->
+<!-- #  -->
+<!-- # #make predictions about testing data -->
+<!-- # predicted <- predict(model, newdata=testing[ ,-1]) -->
+<!-- #  -->
+<!-- # # how much variation does the model account for in the  -->
+<!-- #  -->
+<!-- # actual <- testing$Over_50k -->
+<!-- # rsq <- 1-sum((actual-predicted)^2)/sum((actual-mean(actual))^2) -->
+<!-- # print(rsq) -->
+<!-- ``` -->
 
 
 ## Conclusion
