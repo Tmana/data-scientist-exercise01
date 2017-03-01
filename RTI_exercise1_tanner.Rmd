@@ -7,7 +7,7 @@ output: html_document
 
 ## Report Summary
 
-This is an analysis of the Census data from 1996, looking at which demographic variables have the greatest effect on whether an individual earns over $50,000 anually.
+This is an analysis of the Census data from 1996, looking at which demographic variables have the greatest effect on whether an individual earns over $50,000 anually. A logistic regression model found demographic features such as age, sex, race and education level to be effective predictive variables. 
 
 ### The following is the exercise prompt:
 
@@ -83,11 +83,16 @@ library(data.table)
 library(ggplot2)
 library(GGally)
 library(dplyr)
+library(tidyr)
+library(useful)
 library(ROCR)
 library(pastecs)
 library(psych)
 library(e1071)
+library(foreach)
 library(shiny)
+library(rpart)
+library(rpart.plot)
 ```
 ```{r}
 setwd("C:/Users/trobart/Desktop/data-scientist-exercise01") #setting working directory, replace with your own filepath
@@ -207,7 +212,7 @@ p6 <- ggplot(census_data, aes(x = Hours_Worked, fill = Over_50k)) +
 
 print(p6)
 ```
-The large majority of individuals have a full 40 hours a week listed, and there are a larger proportion of 50k earners for hours worked above 40 than those below.
+The large majority of individuals have a full 40 hours a week listed, and there are a larger proportion of 50k earners for hours worked above 40 than those below. Perhaps we should group these categories together within the feature when doing feature selection.
 
 
 #### Workclass
@@ -254,6 +259,17 @@ print(p5)
 Examining the Relationship variable, we see clearly that husbands and wives are much more likely to earn over 50k compared to the other categories. This may be a good correlated feature in our models, so we should definitely use it, and maybe even split it into a binary of is wife/husband or not.  
 
 
+
+#### Country of Origin
+```{r}
+p5 <- ggplot(census_data, aes(x = Country, fill = Over_50k )) + 
+  geom_bar() + 
+  theme( axis.text.x = element_text(angle=45))
+
+print(p5)
+```
+The overwhelming majority of observations in our data are from the United States, which provides little explanatory power as a feature, so we may wish to remove it from our training features
+
 #### Capital Gain
 ```{r}
 
@@ -291,15 +307,44 @@ testing <- census_data[-sub, ]
 
 ## Create a model that predicts whether individuals, based on the census variables provided, make over $50,000/year.
 
-Next we will fit a few models and compare their performance. But first we need to perform some feature selection based on our previous explorations.
+Next we will fit a model and examine their performance. But first we need to perform some feature selection based on our previous explorations.
 
 ### Feature selection 
 
-```{r}
-# training <- training[ c("Relationship", "Education_Level") := NULL]
-# testing <- testing[ c("Relationship", "Education_Level") := NULL]
-levels(testing) = list(HS_or_less = c(1, 3, 8), undergrad = c(2, 4), graduate = 5:7)
-levels(training) = list(HS_or_less = c(1, 3, 8), undergrad = c(2, 4), graduate = 5:7)
+
+```{r, message=FALSE, warning=FALSE, include=FALSE}
+
+
+#dropping uninformative and co-linear features for training
+training[,education_num := NULL] #co-linear with education level
+training[,Relationship := NULL] #co-linear with marital status and sex
+training[,Country := NULL]   #uninformative feature
+
+
+#dropping uninformative and co-linear features for testing
+testing[,education_num := NULL] #co-linear with education level
+testing[,Relationship := NULL]  #co-linear with marital status and sex
+testing[,Country := NULL] #uninformative feature
+
+
+
+
+#grouping similar levels of education together
+levels(testing$Education_Level) = list(less_than_HS = c("1st-4th", "5th-6th", "7th-8th", "9th", "10th", "11th", "12th"), undergrad = c("Some-college", "Bachelors"), graduate = c("Masters", "Doctorate", "Prof-school"), associate = c("Assoc-voc", "Assoc-acdm") )
+levels(training$Education_Level) = list(less_than_HS = c("1st-4th", "5th-6th", "7th-8th", "9th", "10th", "11th", "12th"), undergrad = c("Some-college", "Bachelors"), graduate = c("Masters", "Doctorate", "Prof-school"), associate = c("Assoc-voc", "Assoc-acdm") )
+
+#grouping less than 40 hours together, and making 40 hours its own level
+levels(testing$Hours_Worked) = list(less_than_40 = 0:39, equals40 = 40)
+levels(training$Hours_Worked) = list(less_than_40 = 0:39, equals40 = 40)
+
+
+levels(testing$Capital_Gain) = list(zero = 0, other = 1:100000)
+levels(training$Capital_Gain) = list(zero = 0, other = 1:100000)
+
+
+levels(testing$Capital_Loss) = list(zero = 0, other = 1:5000)
+levels(training$Capital_Loss) = list(zero = 0, other = 1:5000)
+
 ```
 
 
@@ -315,11 +360,8 @@ summary(mylogit)
 anova(mylogit, test="Chisq")
 ```
 
-
-
-### Testing and Validation
-
 ```{r}
+#testing and validation
 predictions <- predict(mylogit, testing, type = "response")
 mylogitPredictions <- prediction(predictions, list(testing$Over_50k))
 
@@ -337,9 +379,12 @@ mylogitAUC
 
 # determining cutoff to use from specificity and sensitivity
 
-# cutoff <- unlist(mylogitROC@alpha.values)[which.max(unlist(mylogitROC@y.values)+ ( 1 - unlist(mylogitROC@x.values) )-1)]
 
-cutoff <- .5 #using a default cutoff of .5 is reasonable and favors high accuracy, but the true positive and false positive rate tradeoff can be optimized to favor one over the other depending on the situation.
+#cutoff using Youden J-statistic
+
+ cutoff <- unlist(mylogitROC@alpha.values)[which.max(unlist(mylogitROC@y.values)+ ( 1 - unlist(mylogitROC@x.values) )-1)]
+
+# cutoff <- .5 #using a default cutoff of .5 is reasonable and favors high accuracy, but the true positive and false positive rate tradeoff can be optimized to favor one over the other depending on the situation.
 
 
 predicted <- ifelse(predictions >= cutoff, 1, 0)
@@ -354,6 +399,84 @@ logitAccuracy
 
 ```
 
+
+#### Naive Bayes
+```{r}
+censusNaive <- naiveBayes(Over_50k ~ . , data=na.omit(training))
+
+actual <- na.omit(testing)$Over_50k
+predictions <- predict(censusNaive, na.omit(testing), type="raw")[,2]
+
+naivePredictions <- prediction(predictions, actual)
+
+#ROC 
+naiveROC <- performance(naivePredictions, 'tpr','fpr')
+plot(naiveROC)
+
+
+cutoff <- unlist(naiveROC@alpha.values)[which.max(unlist(naiveROC@y.values)+ ( 1 - unlist(naiveROC@x.values) )-1)]
+
+#Accuracy
+naiveACC <- performance(naivePredictions, 'acc')
+plot(naiveACC)
+
+#Area Under the Curve
+naiveAUC <- performance(naivePredictions, 'auc')
+naiveAUC <- unlist(naiveAUC@y.values)
+naiveAUC
+
+predicted <- ifelse(predictions >= cutoff, 1, 0)
+naiveConfusion <- table(actual, predicted)
+naiveTruePos <- naiveConfusion[2,2]/sum(naiveConfusion[2,])
+naiveTrueNeg <- naiveConfusion[1,1]/sum(naiveConfusion[1,])
+naiveAccuracy <-sum(naiveConfusion[2,2],naiveConfusion[1,1])/sum(naiveConfusion)
+
+naiveTruePos
+naiveTrueNeg
+naiveAccuracy
+```
+
+
+#### Decision Tree
+```{r}
+mytree <- rpart(Over_50k ~ ., data=na.omit(training), method="anova")
+printcp(mytree)
+print(mytree)
+rpart.plot(mytree)
+
+actual <- na.omit(testing)$Over_50k
+predictions <- predict(mytree, na.omit(testing))
+
+mytreePredictions <- prediction(predictions, actual)
+
+#ROC 
+mytreeROC <- performance(mytreePredictions, 'tpr','fpr')
+plot(mytreeROC)
+
+
+
+#Accuracy
+mytreeACC <- performance(mytreePredictions, 'acc')
+plot(mytreeACC)
+
+#Area Under the Curve
+mytreeAUC <- performance(mytreePredictions, 'auc')
+mytreeAUC <- unlist(mytreeAUC@y.values)
+mytreeAUC
+
+cutoff <- unlist(mytreeROC@alpha.values)[which.max(unlist(mytreeROC@y.values)+ ( 1 - unlist(mytreeROC@x.values) )-1)]
+
+predicted <- ifelse(predictions >= cutoff, 1, 0)
+mytreeConfusion <- table(actual, predicted)
+mytreeConfusion
+mytreeTruePos <- mytreeConfusion[2,2]/sum(mytreeConfusion[2,])
+mytreeTrueNeg <- mytreeConfusion[1,1]/sum(mytreeConfusion[1,])
+mytreeAccuracy <-sum(mytreeConfusion[2,2],mytreeConfusion[1,1])/sum(mytreeConfusion)
+
+mytreeTruePos
+mytreeTrueNeg
+mytreeAccuracy
+```
 
 <!-- ## Support Vector Machine Model -->
 
@@ -390,3 +513,7 @@ logitAccuracy
 
 
 ## Conclusion
+
+This census data contains some very interesting relationships between the target variable of earning over 50k per year, and demographic features. Attempts to train an SVM failed because the runtime for fitting was over 3 hours without any sign of finishing, even on a subset of features. This difficulty might be fixed by using the SVM implementation of caret, or the deprecated Rsofia package made by google which is supposed to be very fast. A simple Logistic regression seems to have performed best out of our models, with an AUC of **~.91**
+
+
