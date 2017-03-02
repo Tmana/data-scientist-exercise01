@@ -388,10 +388,10 @@ mylogitAUC
 
 
 predicted <- ifelse(predictions >= cutoff, 1, 0)
-logitConfusion <- table(testing$Over_50k, predicted)
-logitTruePos <- logitConfusion[2,2]/sum(logitConfusion[2,])
-logitTrueNeg <- logitConfusion[1,1]/sum(logitConfusion[1,])
-logitAccuracy <-sum(logitConfusion[2,2],logitConfusion[1,1])/sum(logitConfusion)
+mylogitConfusion <- table(testing$Over_50k, predicted)
+logitTruePos <- mylogitConfusion[2,2]/sum(mylogitConfusion[2,])
+logitTrueNeg <- mylogitConfusion[1,1]/sum(mylogitConfusion[1,])
+logitAccuracy <-sum(mylogitConfusion[2,2],mylogitConfusion[1,1])/sum(mylogitConfusion)
 
 logitTruePos
 logitTrueNeg
@@ -400,12 +400,17 @@ logitAccuracy
 ```
 
 
+
 #### Naive Bayes
 ```{r}
-censusNaive <- naiveBayes(Over_50k ~ . , data=na.omit(training))
+myNaive <- naiveBayes(Over_50k ~ . , data=na.omit(training))
+summary(myNaive)
+```
 
+#### Testing and Validation
+```{r}
 actual <- na.omit(testing)$Over_50k
-predictions <- predict(censusNaive, na.omit(testing), type="raw")[,2]
+predictions <- predict(myNaive, na.omit(testing), type="raw")[,2]
 
 naivePredictions <- prediction(predictions, actual)
 
@@ -420,7 +425,7 @@ cutoff <- unlist(naiveROC@alpha.values)[which.max(unlist(naiveROC@y.values)+ ( 1
 naiveACC <- performance(naivePredictions, 'acc')
 plot(naiveACC)
 
-#Area Under the Curve
+#AUC
 naiveAUC <- performance(naivePredictions, 'auc')
 naiveAUC <- unlist(naiveAUC@y.values)
 naiveAUC
@@ -440,10 +445,15 @@ naiveAccuracy
 #### Decision Tree
 ```{r}
 mytree <- rpart(Over_50k ~ ., data=na.omit(training), method="anova")
+summary(mytree)
 printcp(mytree)
 print(mytree)
 rpart.plot(mytree)
+```
 
+
+#### Testing and Validation
+```{r}
 actual <- na.omit(testing)$Over_50k
 predictions <- predict(mytree, na.omit(testing))
 
@@ -514,6 +524,8 @@ mytreeAccuracy
 
 ## Conclusion
 
-This census data contains some very interesting relationships between the target variable of earning over 50k per year, and demographic features. Attempts to train an SVM failed because the runtime for fitting was over 3 hours without any sign of finishing, even on a subset of features. This difficulty might be fixed by using the SVM implementation of caret, or the deprecated Rsofia package made by google which is supposed to be very fast. A simple Logistic regression seems to have performed best out of our models, with an AUC of **~.91**
+This census data contains some very interesting relationships between the target variable of earning over 50k per year, and demographic features. Attempts to train an SVM failed because the runtime for fitting was over 3 hours without any sign of finishing, even on a subset of features. This difficulty might be fixed by using the SVM implementation of caret, or the deprecated Rsofia package made by google which is supposed to be very fast.
+
+A simple Logistic regression seems to have performed best out of our models, with an AUC of **~91%**, and an accuracy of **~79%**. The decision tree had a slightly better accuracy with **~82.8%**, but worse true positive and AUC.
 
 
